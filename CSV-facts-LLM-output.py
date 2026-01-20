@@ -1,29 +1,51 @@
 import json
 import pandas as pd
 from tzarfati_func import call_claude_sonnet
+from rule_engine import detect_events
+
+# Prefer explicit imports rather than star-imports
+from extract_CSV_columns import extract_csv_columns, build_facts_from_csv_and_events
 
 
 # -------- 1. Load CSV --------
-df = pd.read_csv("flight.csv")
+# df = pd.read_csv("flight.csv")
+df = pd.read_csv("NavGpsMetry.csv")
 
 # -------- 2. Deterministic analysis --------
-altitude_min = df["altitude"].min()
+""" altitude_min = df["altitude"].min()
 altitude_max = df["altitude"].max()
-vertical_speed_min = df["vertical_speed"].min()
+vertical_speed_min = df["vertical_speed"].min() """
 
 events = []
 
-# זיהוי ירידה חדה פשוטה
-for i in range(1, len(df)):
-    if df.loc[i, "vertical_speed"] < -1.5:
-        events.append({
-            "time": float(df.loc[i, "time"]),
-            "type": "rapid_descent",
-            "details": "vertical_speed below -1.5 m/s"
-        })
+signals = extract_csv_columns("NavGpsMetry.csv")
+#signals = extract_csv_columns("flight.csv")
+print(signals)
+rc = RuleCreator(available_signals=signals, use_llm=True)
+
+print("RuleCreator (type 'exit' to stop)")
+print(rc.start())
+
+while True:
+    user = input("> ").strip()
+    if user.lower() in {"exit", "quit"}:
+        break
+    out = rc.handle(user)
+    if isinstance(out, dict):
+        print(out.get("message", ""))
+        print("Final rule:")
+        print("rule:", out["rule"])
+        rule = out["rule"]
+        break
+    print(out)
+
+rule = {'name': 'rapid_descent', 'severity': 'medium', 'description': 'vertical_speed lt -1.5', 'condition': {'signal': 'vertical_speed', 'operator': 'lt', 'value': -1.5}}
+
+# זיהוי כללי של אירוע
+events = detect_events(df, [rule])
 
 # -------- 3. Facts JSON (האמת היחידה) --------
-facts = {
+""" facts = {
     "stats": {
         "altitude_min": float(altitude_min),
         "altitude_max": float(altitude_max),
@@ -31,8 +53,12 @@ facts = {
     },
     "events_detected": events,
     "domain_context": "Drone flight test"
-}
+} """
 
+# ✅ build_facts_from_csv_and_events expects a CSV path, not the signals list
+# facts = build_facts_from_csv_and_events("flight.csv", events, domain_context="Drone flight test")
+
+# print("Facts:", facts)
 # -------- 4. Schema --------
 schema = {
     "run_summary": {
@@ -64,12 +90,12 @@ Produce a JSON that strictly follows this schema:
 {json.dumps(schema, indent=2)}
 
 Rules:
-- Use only the provided facts
+- Use only the provided events
 - Do not invent data
 - Output valid JSON only
 
-Facts:
-{json.dumps(facts, indent=2)}
+Events:
+{json.dumps(events, indent=2)}
 """
 
 # -------- 6. LLM Call --------
